@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jenkins 定时发版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-bottom: 30px;
+            color: #333;
+        }
+        .nav {
+            margin-bottom: 20px;
+        }
+        .nav a {
+            color: #1890ff;
+            text-decoration: none;
+            margin-right: 20px;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+        }
+        input[type="datetime-local"], select, input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="datetime-local"]:focus, select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #1890ff;
+        }
+        .jobs-list {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+        .job-tree {
+            list-style: none;
+        }
+        .job-tree ul {
+            list-style: none;
+            margin-left: 16px;
+            border-left: 1px solid #e8e8e8;
+            padding-left: 8px;
+        }
+        .tree-node {
+            padding: 6px 0;
+            line-height: 1.5;
+        }
+        .tree-node.folder {
+            background: rgba(0,0,0,.02);
+            margin: 0 -10px;
+            padding: 6px 10px;
+            border-left: 3px solid transparent;
+        }
+        .tree-node.folder > .tree-node-head {
+            color: #666;
+            font-weight: 500;
+        }
+        .tree-node.job .tree-node-head {
+            border-left: 3px solid transparent;
+            margin-left: 0;
+            padding-left: 4px;
+        }
+        .tree-node.job.job-selected .tree-node-head {
+            border-left-color: #1890ff;
+            background: rgba(24,144,255,.06);
+            margin: 0 -10px;
+            padding-left: 14px;
+        }
+        .tree-node-head {
+            display: flex;
+            align-items: center;
+            cursor: default;
+            user-select: none;
+        }
+        .tree-node-head .toggle {
+            width: 18px;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }
+        .tree-node-head .toggle:hover {
+            color: #1890ff;
+        }
+        .tree-node-head input[type="checkbox"] {
+            width: auto;
+            margin: 0 8px 0 0;
+        }
+        .tree-node-head .name {
+            flex: 1;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #1890ff;
+            color: white;
+        }
+        .btn:hover {
+            background: #40a9ff;
+        }
+        .btn:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .message.success {
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            color: #52c41a;
+        }
+        .message.error {
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            color: #ff4d4f;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+        }
+        .tree-toolbar {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background: #fafafa;
+            border: 1px solid #e8e8e8;
+            border-radius: 4px;
+        }
+        .tree-toolbar.visible {
+            display: flex;
+        }
+        .tree-toolbar .batch-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            border: none;
+            border-radius: 4px;
+            background: #1890ff;
+            color: white;
+            cursor: pointer;
+        }
+        .tree-toolbar .batch-btn:hover { background: #40a9ff; }
+        .tree-toolbar .expand-toggle {
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #666;
+            background: white;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tree-toolbar .expand-toggle:hover { border-color: #1890ff; color: #1890ff; }
+        .tree-toolbar .selected-count { font-size: 13px; color: #666; }
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.4);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.visible {
+            display: flex;
+        }
+        .modal-box {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            min-width: 400px;
+            max-width: 90vw;
+            box-shadow: 0 4px 20px rgba(0,0,0,.15);
+        }
+        .modal-box h3 { margin-bottom: 16px; font-size: 16px; }
+        .modal-box .form-group { margin-bottom: 14px; }
+        .modal-box .form-row { display: flex; gap: 12px; align-items: flex-end; }
+        .modal-box .form-row .form-group { flex: 1; margin-bottom: 0; }
+        .modal-actions { margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-actions .btn { padding: 8px 18px; }
+        .modal-actions .btn-secondary { background: #f0f0f0; color: #333; }
+        .modal-actions .btn-secondary:hover { background: #e0e0e0; }
+        .batch-param-fields { margin-bottom: 14px; }
+        .batch-param-fields .form-group { margin-bottom: 10px; }
+        .batch-search-wrap { position: relative; }
+        .batch-search-wrap input[type="text"] { width: 100%; }
+        .batch-search-list {
+            position: absolute; left: 0; right: 0; top: 100%; z-index: 10;
+            max-height: 200px; overflow-y: auto; margin: 0; padding: 0;
+            list-style: none; border: 1px solid #d9d9d9; border-top: none;
+            background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.1);
+        }
+        .batch-search-list li { padding: 8px 12px; cursor: pointer; }
+        .batch-search-list li:hover, .batch-search-list li.active { background: #f0f7ff; }
+        .batch-search-list li.empty { color: #999; cursor: default; }
+        .schedule-options { display: flex; gap: 16px; align-items: center; }
+        .schedule-option { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+        .confirm-table-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; border: 1px solid #d9d9d9; border-radius: 4px; }
+        .confirm-table { width: 100%; border-collapse: collapse; }
+        .confirm-table th, .confirm-table td { border: 1px solid #e8e8e8; padding: 8px 10px; text-align: left; }
+        .confirm-table th { background: #fafafa; font-weight: 500; position: sticky; top: 0; }
+        .confirm-table td input, .confirm-table td select { width: 100%; padding: 4px 8px; border: 1px solid #d9d9d9; border-radius: 4px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Jenkins 定时发版</h1>
+        <div class="nav">
+            <a href="/">创建发版计划</a>
+            <a href="/plans">发版计划列表</a>
+            <a href="/config">配置</a>
+        </div>
+
+        <div id="message"></div>
+
+        <!-- 第一步：选择任务并批量设置 -->
+        <div id="step1View">
+            <form id="releaseForm">
+                <div class="form-group">
+                    <label>选择要发版的任务 *</label>
+                    <div class="tree-toolbar" id="treeToolbar">
+                        <span class="selected-count" id="selectedCount">已选 0 个任务</span>
+                        <button type="button" class="batch-btn" id="batchSetBtn">批量设置</button>
+                        <button type="button" class="expand-toggle" id="expandAllBtn">全部展开</button>
+                        <button type="button" class="expand-toggle" id="collapseAllBtn">全部收起</button>
+                    </div>
+                    <div class="jobs-list" id="jobsList">
+                        <div class="loading">加载任务列表中...</div>
+                    </div>
+                </div>
+                <button type="button" class="btn" id="nextStepBtn">下一步</button>
+            </form>
+        </div>
+
+        <!-- 第二步：确认参数与发版时间 -->
+        <div id="step2View" style="display: none;">
+            <button type="button" class="btn btn-secondary" id="backStepBtn" style="margin-bottom: 16px;">上一步</button>
+            <div class="form-group">
+                <label>发版时间 *</label>
+                <div class="schedule-options">
+                    <label class="schedule-option"><input type="radio" name="scheduleType" value="immediate" id="scheduleImmediate"> 立即发版</label>
+                    <label class="schedule-option"><input type="radio" name="scheduleType" value="scheduled" id="scheduleScheduled"> 预约发版</label>
+                </div>
+                <div class="form-group" id="scheduledAtGroup" style="display: none; margin-top: 8px;">
+                    <label>计划执行时间（东八区）*</label>
+                    <input type="datetime-local" id="scheduledAt">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>确认任务参数（可微调）</label>
+                <div id="confirmTableWrap" class="confirm-table-wrap">
+                    <div class="loading" id="confirmTableLoading">加载中...</div>
+                    <table id="confirmTable" class="confirm-table" style="display: none;"></table>
+                </div>
+            </div>
+            <button type="button" class="btn" id="submitBtn">创建发版计划</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="batchModal">
+        <div class="modal-box">
+            <h3>批量设置（参数配置与发版项目）</h3>
+            <div class="form-group">
+                <label>Jenkins 参数配置 *</label>
+                <select id="batchParamConfig">
+                    <option value="">请选择参数配置</option>
+                </select>
+                <p style="font-size:12px;color:#888;margin-top:4px;">选择后下方将根据该配置动态生成可填参数</p>
+            </div>
+            <div class="form-group" id="batchProjectGroup" style="display: none;">
+                <label>发版项目（GitLab）</label>
+                <p style="font-size:12px;color:#888;margin-bottom:6px;">根据所选参数配置中的 GitLab 连接加载项目，可搜索</p>
+                <input type="hidden" id="batchGitlabConfigId" value="">
+                <input type="hidden" id="batchGitlabProjectId" value="">
+                <div class="batch-search-wrap" id="batchProjectSearchWrap">
+                    <input type="text" id="batchProjectSearchInput" class="batch-param-input" placeholder="输入搜索项目名..." autocomplete="off">
+                    <ul class="batch-search-list" id="batchProjectSearchList" style="display: none;"></ul>
+                </div>
+            </div>
+            <div id="batchParamFields" class="batch-param-fields"></div>
+            <p style="font-size:12px;color:#888;margin-bottom:12px;" id="batchApplyHint">将应用至已选 <strong id="batchApplyCount">0</strong> 个任务</p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="batchModalCancel">取消</button>
+                <button type="button" class="btn" id="batchModalApply">应用</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 操作选项（与 deploy.pipline 一致）
+        const operations = [
+            '拉取代码-编译',
+            '-----',
+            '拉取代码-编译-单元测试',
+            '-----',
+            '重启服务',
+            '-----',
+            '停止服务',
+            '-----',
+            '扩容服务',
+            '-----',
+            '回滚服务'
+        ];
+
+        let jobs = [];
+        let gitlabConfigs = [];
+        let jenkinsParamConfigs = [];
+        /** 批量设置应用后暂存：path -> { params: { param_name: value } }，提交时直接用作 build_params */
+        let pendingBatchMap = new Map();
+
+        // 加载任务列表 + GitLab 配置 + Jenkins 参数配置（弹窗内发版项目与动态参数用）
+        async function loadJobs() {
+            try {
+                const [jobsRes, glRes, jpcRes] = await Promise.all([
+                    fetch('/api/jenkins/jobs'),
+                    fetch('/api/gitlab/configs'),
+                    fetch('/api/jenkins-param-configs')
+                ]);
+                const jobsResult = await jobsRes.json();
+                if (!jobsResult.success) {
+                    showMessage('加载任务列表失败: ' + jobsResult.error, 'error');
+                    return;
+                }
+                jobs = jobsResult.data;
+                const gl = await glRes.json();
+                gitlabConfigs = (gl.success && gl.data) ? gl.data : [];
+                const jpc = await jpcRes.json();
+                jenkinsParamConfigs = (jpc.success && jpc.data) ? jpc.data : [];
+                renderJobs();
+            } catch (error) {
+                showMessage('加载任务列表失败: ' + error.message, 'error');
+            }
+        }
+
+        // 渲染单个树节点（文件夹或任务，树节点仅展示名称与勾选，配置统一在「批量设置」弹窗）
+        function renderNode(node, depth) {
+            if (node.type === 'folder') {
+                const childHtml = node.children.length
+                    ? node.children.map(c => renderNode(c, depth + 1)).join('')
+                    : '<li class="tree-node empty">无子项</li>';
+                return `
+                    <li class="tree-node folder" data-path="${escapeAttr(node.path)}">
+                        <div class="tree-node-head">
+                            <span class="toggle" title="展开/收起">▶</span>
+                            <span class="name">📁 ${escapeHtml(node.name)}</span>
+                        </div>
+                        <ul class="tree-children" style="display: none;">${childHtml}</ul>
+                    </li>`;
+            }
+            const pathId = node.path.replace(/\//g, '_').replace(/[^a-zA-Z0-9_-]/g, '');
+            return `
+                <li class="tree-node job" data-path="${escapeAttr(node.path)}" data-name="${escapeAttr(node.name)}">
+                    <div class="tree-node-head">
+                        <input type="checkbox" id="job_${pathId}" class="job-checkbox" data-job-path="${escapeAttr(node.path)}" data-job-name="${escapeAttr(node.name)}">
+                        <span class="name">${escapeHtml(node.name)}</span>
+                    </div>
+                </li>`;
+        }
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+        function escapeAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function updateToolbarVisibility() {
+            const checked = document.querySelectorAll('.job-checkbox:checked');
+            const n = checked.length;
+            const toolbar = document.getElementById('treeToolbar');
+            const countEl = document.getElementById('selectedCount');
+            if (toolbar && countEl) {
+                toolbar.classList.toggle('visible', n > 0);
+                countEl.textContent = '已选 ' + n + ' 个任务';
+            }
+            document.querySelectorAll('.tree-node.job').forEach(li => {
+                const cb = li.querySelector('.job-checkbox');
+                li.classList.toggle('job-selected', cb && cb.checked);
+            });
+        }
+
+        // 渲染任务树
+        function renderJobs() {
+            const container = document.getElementById('jobsList');
+            if (!jobs || jobs.length === 0) {
+                container.innerHTML = '<div class="loading">暂无任务</div>';
+                return;
+            }
+            container.innerHTML = '<ul class="job-tree">' + jobs.map(n => renderNode(n, 0)).join('') + '</ul>';
+
+            // 文件夹展开/收起（仅绑定文件夹自身的 .tree-node-head，避免绑定到子任务的 head 导致勾选任务时误触发展开/收起）
+            container.querySelectorAll('.tree-node.folder > .tree-node-head').forEach(head => {
+                head.addEventListener('click', function() {
+                    const folderLi = this.closest('.tree-node.folder');
+                    const ul = folderLi.querySelector(':scope > .tree-children');
+                    const toggle = this.querySelector('.toggle');
+                    if (ul && ul.style.display === 'none') {
+                        ul.style.display = 'block';
+                        if (toggle) toggle.textContent = '▼';
+                    } else if (ul) {
+                        ul.style.display = 'none';
+                        if (toggle) toggle.textContent = '▶';
+                    }
+                });
+            });
+            // 任务勾选仅更新工具栏与选中样式，配置在「批量设置」弹窗完成
+            container.querySelectorAll('.job-checkbox').forEach(cb => {
+                cb.addEventListener('change', function() {
+                    updateToolbarVisibility();
+                });
+            });
+            updateToolbarVisibility();
+            // 全部展开/收起（只操作文件夹直接子元素 .tree-children，避免误选到其他节点）
+            document.getElementById('expandAllBtn').addEventListener('click', function() {
+                container.querySelectorAll('.tree-node.folder > .tree-children').forEach(ul => { ul.style.display = 'block'; });
+                container.querySelectorAll('.tree-node.folder > .tree-node-head .toggle').forEach(t => { t.textContent = '▼'; });
+            });
+            document.getElementById('collapseAllBtn').addEventListener('click', function() {
+                container.querySelectorAll('.tree-node.folder > .tree-children').forEach(ul => { ul.style.display = 'none'; });
+                container.querySelectorAll('.tree-node.folder > .tree-node-head .toggle').forEach(t => { t.textContent = '▶'; });
+            });
+            // 批量设置弹窗
+            openBatchModal();
+        }
+
+        function openBatchModal() {
+            const batchSetBtn = document.getElementById('batchSetBtn');
+            const modal = document.getElementById('batchModal');
+            const cancelBtn = document.getElementById('batchModalCancel');
+            const applyBtn = document.getElementById('batchModalApply');
+            const paramConfigSel = document.getElementById('batchParamConfig');
+            const paramFieldsEl = document.getElementById('batchParamFields');
+            if (!batchSetBtn || !modal) return;
+            batchSetBtn.addEventListener('click', function() {
+                const paths = getSelectedJobPaths();
+                if (paths.length === 0) {
+                    showMessage('请先勾选要发版的任务', 'error');
+                    return;
+                }
+                document.getElementById('batchApplyCount').textContent = paths.length;
+                paramConfigSel.innerHTML = '<option value="">请选择参数配置</option>' + (jenkinsParamConfigs || []).map(c => '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>').join('');
+                paramConfigSel.value = '';
+                paramFieldsEl.innerHTML = '';
+                document.getElementById('batchProjectGroup').style.display = 'none';
+                document.getElementById('batchGitlabConfigId').value = '';
+                document.getElementById('batchGitlabProjectId').value = '';
+                document.getElementById('batchProjectSearchInput').value = '';
+                document.getElementById('batchProjectSearchList').innerHTML = '';
+                modal.classList.add('visible');
+            });
+            paramConfigSel.addEventListener('change', async function() {
+                const id = this.value ? parseInt(this.value, 10) : 0;
+                paramFieldsEl.innerHTML = '';
+                document.getElementById('batchGitlabProjectId').value = '';
+                document.getElementById('batchProjectSearchInput').value = '';
+                document.getElementById('batchProjectSearchList').innerHTML = '';
+                const batchProjectGroup = document.getElementById('batchProjectGroup');
+                if (!id) {
+                    batchProjectGroup.style.display = 'none';
+                    return;
+                }
+                const config = (jenkinsParamConfigs || []).find(c => c.id === id);
+                if (!config || !config.param_definitions || !config.param_definitions.length) return;
+                const configId = config.gitlab_config_id != null && config.gitlab_config_id !== '' ? config.gitlab_config_id : null;
+                if (configId) {
+                    document.getElementById('batchGitlabConfigId').value = configId;
+                    batchProjectGroup.style.display = 'block';
+                    try {
+                        const r = await fetch('/api/gitlab/projects?config_id=' + encodeURIComponent(configId));
+                        const res = await r.json();
+                        const projects = (res.success && res.data) ? res.data : [];
+                        window._batchProjects = projects;
+                        bindProjectSearch(projects);
+                    } catch (e) {
+                        window._batchProjects = [];
+                        bindProjectSearch([]);
+                    }
+                } else {
+                    document.getElementById('batchGitlabConfigId').value = '';
+                    batchProjectGroup.style.display = 'none';
+                    window._batchProjects = [];
+                }
+                for (const def of config.param_definitions) {
+                    const paramName = def.param_name || '';
+                    const label = def.label || paramName;
+                    const allowEmpty = def.allow_empty !== false;
+                    const type = (def.param_type || 'text').toLowerCase();
+                    const div = document.createElement('div');
+                    div.className = 'form-group';
+                    div.setAttribute('data-param-name', paramName);
+                    if (def.source === 'gitlab_branches') div.setAttribute('data-source', 'gitlab_branches');
+                    let options = def.options || [];
+                    if (def.source === 'dictionary' && def.dictionary_id) {
+                        try {
+                            const r = await fetch('/api/dictionaries/' + def.dictionary_id + '/options');
+                            const res = await r.json();
+                            if (res.success && res.data) options = res.data;
+                        } catch (e) {}
+                    }
+                    if (def.source === 'gitlab_branches') options = [];
+                    let inputHtml = '';
+                    if (type === 'dropdown' && (options.length > 0 || def.source === 'gitlab_branches')) {
+                        inputHtml = makeSearchableParamField(paramName, options, allowEmpty, def.source === 'gitlab_branches');
+                    } else if (type === 'number') {
+                        inputHtml = '<input type="number" class="batch-param-input" data-param-name="' + escapeAttr(paramName) + '" placeholder="' + (allowEmpty ? '可留空' : '') + '">';
+                    } else {
+                        inputHtml = '<input type="text" class="batch-param-input" data-param-name="' + escapeAttr(paramName) + '" placeholder="' + (allowEmpty ? '可留空' : '') + '">';
+                    }
+                    div.innerHTML = '<label>' + escapeHtml(label) + '</label>' + inputHtml;
+                    paramFieldsEl.appendChild(div);
+                }
+            });
+            function bindProjectSearch(projects) {
+                const inp = document.getElementById('batchProjectSearchInput');
+                const listEl = document.getElementById('batchProjectSearchList');
+                function showList(filter) {
+                    const f = (filter || '').toLowerCase();
+                    const items = projects.filter(p => {
+                        const t = (p.path_with_namespace || p.name || '').toLowerCase();
+                        return !f || t.indexOf(f) >= 0;
+                    });
+                    listEl.innerHTML = items.length ? items.map(p => '<li data-id="' + p.id + '" data-text="' + escapeAttr(p.path_with_namespace || p.name || p.id) + '">' + escapeHtml(p.path_with_namespace || p.name || p.id) + '</li>').join('') : '<li class="empty">无匹配项目</li>';
+                    listEl.style.display = 'block';
+                    listEl.querySelectorAll('li:not(.empty)').forEach(li => {
+                        li.addEventListener('click', function() {
+                            document.getElementById('batchGitlabProjectId').value = this.getAttribute('data-id');
+                            inp.value = this.getAttribute('data-text');
+                            listEl.style.display = 'none';
+                            loadBranchesForBatchParams();
+                        });
+                    });
+                }
+                inp.onfocus = function() { showList(this.value); };
+                inp.oninput = inp.onkeyup = function() { showList(this.value); };
+                inp.onblur = function() { setTimeout(function() { listEl.style.display = 'none'; }, 200); };
+            }
+            function loadBranchesForBatchParams() {
+                const configId = document.getElementById('batchGitlabConfigId').value;
+                const projectId = document.getElementById('batchGitlabProjectId').value;
+                if (!configId || !projectId) return;
+                fetch('/api/gitlab/branches?config_id=' + encodeURIComponent(configId) + '&project_id=' + encodeURIComponent(projectId))
+                    .then(r => r.json())
+                    .then(function(res) {
+                        const branches = (res.success && res.data) ? res.data : [];
+                        paramFieldsEl.querySelectorAll('[data-source="gitlab_branches"]').forEach(function(wrap) {
+                            const list = wrap.querySelector('.batch-search-list');
+                            const hid = wrap.querySelector('input[type="hidden"]');
+                            if (list && hid) {
+                                list.innerHTML = branches.length ? branches.map(function(b) {
+                                    const v = typeof b === 'string' ? b : (b.name || b);
+                                    return '<li data-value="' + escapeAttr(v) + '">' + escapeHtml(v) + '</li>';
+                                }).join('') : '<li class="empty">无分支</li>';
+                                list.querySelectorAll('li:not(.empty)').forEach(function(li) {
+                                    li.onclick = function() {
+                                        hid.value = this.getAttribute('data-value');
+                                        wrap.querySelector('.batch-search-input').value = this.getAttribute('data-value');
+                                        list.style.display = 'none';
+                                    };
+                                });
+                            }
+                        });
+                    })
+                    .catch(function() {});
+            }
+            function makeSearchableParamField(paramName, options, allowEmpty, isBranch) {
+                const opts = (options || []).map(function(v) { return { value: String(v), text: String(v) }; });
+                const id = 'batch_param_' + escapeAttr(paramName).replace(/\s/g, '_');
+                let lis = opts.length ? opts.map(function(o) { return '<li data-value="' + escapeAttr(o.value) + '">' + escapeHtml(o.text) + '</li>'; }).join('') : (isBranch ? '<li class="empty">请先选择发版项目</li>' : '<li class="empty">无选项</li>');
+                return '<div class="batch-search-wrap" data-param-name="' + escapeAttr(paramName) + '">' +
+                    '<input type="hidden" class="batch-param-input" data-param-name="' + escapeAttr(paramName) + '" value="">' +
+                    '<input type="text" class="batch-search-input" placeholder="输入搜索..." autocomplete="off" value="">' +
+                    '<ul class="batch-search-list" style="display: none;">' + lis + '</ul></div>';
+            }
+            paramFieldsEl.addEventListener('focusin', function(e) {
+                const wrap = e.target.closest('.batch-search-wrap');
+                if (!wrap) return;
+                const inp = wrap.querySelector('.batch-search-input');
+                const list = wrap.querySelector('.batch-search-list');
+                if (inp && list && inp === e.target) {
+                    paramFieldsEl.querySelectorAll('.batch-search-list').forEach(function(l) { l.style.display = 'none'; });
+                    const items = list.querySelectorAll('li:not(.empty)');
+                    list.style.display = items.length ? 'block' : 'none';
+                }
+            });
+            paramFieldsEl.addEventListener('focusout', function(e) {
+                const wrap = e.target.closest('.batch-search-wrap');
+                if (!wrap) return;
+                const list = wrap.querySelector('.batch-search-list');
+                if (list) setTimeout(function() { list.style.display = 'none'; }, 200);
+            });
+            paramFieldsEl.addEventListener('input', function(e) {
+                const wrap = e.target.closest('.batch-search-wrap');
+                if (!wrap || e.target.className.indexOf('batch-search-input') < 0) return;
+                const list = wrap.querySelector('.batch-search-list');
+                const filter = (e.target.value || '').toLowerCase();
+                list.querySelectorAll('li:not(.empty)').forEach(function(li) {
+                    const t = (li.getAttribute('data-value') || '').toLowerCase();
+                    li.style.display = !filter || t.indexOf(filter) >= 0 ? '' : 'none';
+                });
+                list.style.display = 'block';
+            });
+            paramFieldsEl.addEventListener('click', function(e) {
+                const li = e.target.closest('.batch-search-list li:not(.empty)');
+                if (!li) return;
+                const wrap = li.closest('.batch-search-wrap');
+                const hid = wrap.querySelector('input[type="hidden"]');
+                const inp = wrap.querySelector('.batch-search-input');
+                if (hid && inp) {
+                    hid.value = li.getAttribute('data-value');
+                    inp.value = li.getAttribute('data-value');
+                    wrap.querySelector('.batch-search-list').style.display = 'none';
+                }
+            });
+            cancelBtn.addEventListener('click', function() { modal.classList.remove('visible'); });
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) modal.classList.remove('visible');
+            });
+            applyBtn.addEventListener('click', applyBatchSettings);
+        }
+
+        function getSelectedJobPaths() {
+            const paths = [];
+            document.querySelectorAll('.job-checkbox:checked').forEach(cb => {
+                const p = cb.getAttribute('data-job-path');
+                if (p) paths.push(p);
+            });
+            return paths;
+        }
+
+        async function applyBatchSettings() {
+            const paths = getSelectedJobPaths();
+            if (paths.length === 0) {
+                document.getElementById('batchModal').classList.remove('visible');
+                return;
+            }
+            const paramConfigId = document.getElementById('batchParamConfig').value;
+            if (!paramConfigId) {
+                showMessage('请先选择 Jenkins 参数配置', 'error');
+                return;
+            }
+            const configId = document.getElementById('batchGitlabConfigId').value.trim();
+            const projectId = document.getElementById('batchGitlabProjectId').value.trim();
+            if (configId && projectId) {
+                try {
+                    const r = await fetch('/api/job-gitlab-override/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ job_paths: paths, gitlab_config_id: parseInt(configId, 10), gitlab_project_id: parseInt(projectId, 10) })
+                    });
+                    const res = await r.json();
+                    if (!res.success) {
+                        showMessage('发版项目设置失败: ' + (res.error || ''), 'error');
+                        return;
+                    }
+                } catch (err) {
+                    showMessage('发版项目设置失败: ' + err.message, 'error');
+                    return;
+                }
+            } else if (configId || projectId) {
+                showMessage('发版项目需同时选择 GitLab 连接与项目', 'error');
+                return;
+            }
+            const params = {};
+            document.getElementById('batchParamFields').querySelectorAll('.batch-param-input').forEach(inp => {
+                const name = inp.getAttribute('data-param-name');
+                if (!name) return;
+                const v = (inp.value || '').trim();
+                if (v) params[name] = v;
+            });
+            if (Object.keys(params).length === 0) {
+                showMessage('请至少填写一项参数（根据参数配置生成的输入）', 'error');
+                return;
+            }
+            for (const path of paths) {
+                pendingBatchMap.set(path, { params: { ...params } });
+            }
+            document.getElementById('batchModal').classList.remove('visible');
+            showMessage('已应用至 ' + paths.length + ' 个任务', 'success');
+        }
+
+        // 显示消息
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            messageDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        /** 第二步要展示的任务列表：{ path, name }[]，在点击「下一步」时确定 */
+        let step2TaskList = [];
+
+        // 下一步：校验并进入第二步
+        document.getElementById('nextStepBtn').addEventListener('click', function() {
+            const list = [];
+            document.querySelectorAll('.job-checkbox:checked').forEach(checkbox => {
+                const path = checkbox.getAttribute('data-job-path');
+                if (!path) return;
+                if (!pendingBatchMap.has(path)) return;
+                list.push({
+                    path,
+                    name: checkbox.getAttribute('data-job-name') || path
+                });
+            });
+            if (list.length === 0) {
+                const checked = document.querySelectorAll('.job-checkbox:checked').length;
+                if (checked === 0) {
+                    showMessage('请先勾选要发版的任务', 'error');
+                } else {
+                    showMessage('请先对已选任务点击「批量设置」并应用配置后再点下一步', 'error');
+                }
+                return;
+            }
+            step2TaskList = list;
+            document.getElementById('step1View').style.display = 'none';
+            document.getElementById('step2View').style.display = 'block';
+            document.getElementById('scheduleScheduled').checked = true;
+            document.getElementById('scheduledAtGroup').style.display = 'block';
+            const now = new Date();
+            const later = new Date(now.getTime() + 60 * 60 * 1000);
+            const y = later.getFullYear(), m = String(later.getMonth() + 1).padStart(2, '0'), d = String(later.getDate()).padStart(2, '0');
+            const h = String(later.getHours()).padStart(2, '0'), min = String(later.getMinutes()).padStart(2, '0');
+            const scheduledAtInput = document.getElementById('scheduledAt');
+            if (!scheduledAtInput.value) scheduledAtInput.value = `${y}-${m}-${d}T${h}:${min}`;
+            buildConfirmTable();
+        });
+
+        // 上一步
+        document.getElementById('backStepBtn').addEventListener('click', function() {
+            document.getElementById('step2View').style.display = 'none';
+            document.getElementById('step1View').style.display = 'block';
+        });
+
+        // 发版时间：立即 / 预约
+        document.querySelectorAll('input[name="scheduleType"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                document.getElementById('scheduledAtGroup').style.display = this.value === 'scheduled' ? 'block' : 'none';
+            });
+        });
+        document.getElementById('scheduleScheduled').addEventListener('change', function() {
+            if (this.checked) document.getElementById('scheduledAtGroup').style.display = 'block';
+        });
+        document.getElementById('scheduleImmediate').addEventListener('change', function() {
+            if (this.checked) document.getElementById('scheduledAtGroup').style.display = 'none';
+        });
+
+        // 第二步：构建确认表格（空参数从 Jenkins API 取默认值），可编辑
+        async function buildConfirmTable() {
+            const loadingEl = document.getElementById('confirmTableLoading');
+            const tableEl = document.getElementById('confirmTable');
+            loadingEl.style.display = 'block';
+            tableEl.style.display = 'none';
+            tableEl.innerHTML = '';
+
+            const pathToDefaults = new Map();
+            const paths = [...new Set(step2TaskList.map(t => t.path))];
+            try {
+                await Promise.all(paths.map(async path => {
+                    try {
+                        const r = await fetch('/api/jenkins/job/parameters?path=' + encodeURIComponent(path));
+                        const j = await r.json();
+                        if (j.success && j.data && j.data.parameters) {
+                            pathToDefaults.set(path, j.data.parameters);
+                        }
+                    } catch (e) {
+                        console.warn('fetch defaults for ' + path, e);
+                    }
+                }));
+            } catch (e) {
+                loadingEl.style.display = 'none';
+                showMessage('加载参数默认值失败: ' + e.message, 'error');
+                return;
+            }
+
+            const allParamNames = new Set();
+            step2TaskList.forEach(t => {
+                const p = pendingBatchMap.get(t.path);
+                if (p && p.params) Object.keys(p.params).forEach(k => allParamNames.add(k));
+            });
+            pathToDefaults.forEach(params => {
+                if (params && typeof params === 'object') Object.keys(params).forEach(k => allParamNames.add(k));
+            });
+            const paramColumns = Array.from(allParamNames).sort();
+
+            const thead = document.createElement('thead');
+            const trHead = document.createElement('tr');
+            trHead.innerHTML = '<th>任务名</th>';
+            paramColumns.forEach(p => {
+                const th = document.createElement('th');
+                th.setAttribute('data-param', p);
+                th.textContent = p;
+                trHead.appendChild(th);
+            });
+            thead.appendChild(trHead);
+            tableEl.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            step2TaskList.forEach((task, rowIndex) => {
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-path', task.path);
+                const baseParams = (pendingBatchMap.get(task.path) || {}).params || {};
+                const defaults = pathToDefaults.get(task.path) || {};
+                const tdName = document.createElement('td');
+                tdName.textContent = task.name;
+                tr.appendChild(tdName);
+                paramColumns.forEach(paramName => {
+                    const td = document.createElement('td');
+                    let val = baseParams[paramName];
+                    if (val === undefined || val === null || String(val).trim() === '') {
+                        const def = defaults[paramName];
+                        val = (def && def.default !== undefined) ? String(def.default || '') : '';
+                    } else {
+                        val = String(val);
+                    }
+                    const choices = defaults[paramName] && defaults[paramName].choices && Array.isArray(defaults[paramName].choices);
+                    if (choices && defaults[paramName].choices.length) {
+                        const sel = document.createElement('select');
+                        sel.setAttribute('data-param', paramName);
+                        defaults[paramName].choices.forEach(c => {
+                            const opt = document.createElement('option');
+                            opt.value = c;
+                            opt.textContent = c;
+                            if (c === val) opt.selected = true;
+                            sel.appendChild(opt);
+                        });
+                        td.appendChild(sel);
+                    } else {
+                        const inp = document.createElement('input');
+                        inp.type = 'text';
+                        inp.setAttribute('data-param', paramName);
+                        inp.value = val;
+                        inp.placeholder = '';
+                        td.appendChild(inp);
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            tableEl.appendChild(tbody);
+            loadingEl.style.display = 'none';
+            tableEl.style.display = 'table';
+        }
+
+        // 从确认表格读取 items（path + params）
+        function getItemsFromConfirmTable() {
+            const items = [];
+            const table = document.getElementById('confirmTable');
+            const paramColumns = [];
+            table.querySelectorAll('thead th').forEach((th, i) => {
+                if (i > 0) paramColumns.push(th.getAttribute('data-param') || th.textContent);
+            });
+            table.querySelectorAll('tbody tr').forEach(tr => {
+                const path = tr.getAttribute('data-path');
+                if (!path) return;
+                const params = {};
+                tr.querySelectorAll('td').forEach((td, colIndex) => {
+                    if (colIndex === 0) return;
+                    const paramName = paramColumns[colIndex - 1];
+                    if (!paramName) return;
+                    const input = td.querySelector('input, select');
+                    if (input) {
+                        const v = (input.value || '').trim();
+                        if (v) params[paramName] = v;
+                    }
+                });
+                items.push({ jenkins_job_name: path, params });
+            });
+            return items;
+        }
+
+        // 第二步：创建发版计划
+        document.getElementById('submitBtn').addEventListener('click', async function() {
+            const immediate = document.getElementById('scheduleImmediate').checked;
+            let scheduledAt = (document.getElementById('scheduledAt').value || '').trim();
+            if (!immediate && !scheduledAt) {
+                showMessage('请选择计划执行时间', 'error');
+                return;
+            }
+
+            const items = getItemsFromConfirmTable();
+            if (items.length === 0) {
+                showMessage('没有可提交的任务', 'error');
+                return;
+            }
+
+            let isoString;
+            if (immediate) {
+                const now = new Date();
+                isoString = now.toISOString().slice(0, 19) + '+00:00';
+            } else {
+                if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(scheduledAt)) {
+                    scheduledAt = scheduledAt.replace(/\s+/, 'T');
+                }
+                const hasSeconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(scheduledAt);
+                isoString = hasSeconds
+                    ? (scheduledAt.endsWith('+08:00') ? scheduledAt : scheduledAt + '+08:00')
+                    : (scheduledAt + (scheduledAt.includes(':') && scheduledAt.length <= 16 ? ':00' : '') + '+08:00');
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '创建中...';
+
+            try {
+                const body = {
+                    scheduled_at: isoString,
+                    default_branch: '',
+                    items,
+                    execute_immediately: immediate
+                };
+                const response = await fetch('/api/plans', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    showMessage(result.warning ? `计划已创建（ID: ${result.data.plan_id}），但立即执行失败: ${result.warning}` : `发版计划创建成功！计划 ID: ${result.data.plan_id}`, result.warning ? 'error' : 'success');
+                    if (!result.warning) {
+                        setTimeout(() => { window.location.href = '/plans'; }, 2000);
+                    } else {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = '创建发版计划';
+                    }
+                } else {
+                    showMessage('创建失败: ' + result.error, 'error');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '创建发版计划';
+                }
+            } catch (error) {
+                showMessage('创建失败: ' + error.message, 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '创建发版计划';
+            }
+        });
+
+        // 页面加载时初始化
+        loadJobs();
+    </script>
+</body>
+</html>

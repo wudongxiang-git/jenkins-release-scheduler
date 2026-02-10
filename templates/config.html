@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统配置 - Jenkins 定时发版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { margin-bottom: 20px; color: #333; }
+        .nav { margin-bottom: 24px; }
+        .nav a { color: #1890ff; text-decoration: none; margin-right: 20px; }
+        .nav a:hover { text-decoration: underline; }
+        h2 { margin: 24px 0 12px; font-size: 16px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        th { background: #fafafa; font-weight: 500; }
+        .btn { padding: 6px 14px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; background: #1890ff; color: white; }
+        .btn:hover { background: #40a9ff; }
+        .btn-small { padding: 4px 10px; font-size: 12px; }
+        .btn-danger { background: #ff4d4f; }
+        .btn-danger:hover { background: #ff7875; }
+        .form-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .form-inline input, .form-inline select { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+        .form-inline label { margin-right: 4px; }
+        textarea { width: 100%; min-height: 80px; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; font-family: monospace; }
+        .jpc-form { margin-bottom: 16px; padding: 12px; background: #fafafa; border-radius: 4px; }
+        .jpc-form-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .jpc-form-row label { min-width: 70px; }
+        .jpc-params { margin-top: 12px; }
+        .jpc-params table { margin-bottom: 8px; }
+        .jpc-params th { font-size: 12px; }
+        .jpc-param-row td { padding: 6px 8px; vertical-align: middle; }
+        .jpc-param-row input[type="text"], .jpc-param-row select { width: 100%; min-width: 0; padding: 4px 8px; font-size: 12px; }
+        .jpc-param-row .source-extra { min-width: 120px; }
+        .message { padding: 10px; border-radius: 4px; margin-bottom: 12px; }
+        .message.success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .message.error { background: #fff2f0; border: 1px solid #ffccc7; color: #ff4d4f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>系统配置</h1>
+        <nav class="nav">
+            <a href="/">首页</a>
+            <a href="/plans">计划列表</a>
+            <a href="/config">配置</a>
+        </nav>
+        <div id="message" class="message" style="display: none;"></div>
+
+        <h2>GitLab 连接</h2>
+        <div class="form-inline">
+            <input type="hidden" id="gl_edit_id" value="">
+            <input type="text" id="gl_name" placeholder="名称">
+            <input type="text" id="gl_base_url" placeholder="Base URL (如 https://gitlab.com)">
+            <input type="password" id="gl_token" placeholder="Private Token">
+            <input type="hidden" id="gl_token_current" value="">
+            <label><input type="checkbox" id="gl_ssl_verify" checked> SSL 验证</label>
+            <button type="button" class="btn" id="gl_add">添加</button>
+            <button type="button" class="btn" id="gl_cancel_edit" style="display: none;">取消编辑</button>
+        </div>
+        <table id="gitlab_table">
+            <thead><tr><th>名称</th><th>Base URL</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+        </table>
+
+        <h2>配置字典</h2>
+        <div class="form-inline">
+            <input type="hidden" id="dict_edit_id" value="">
+            <input type="text" id="dict_name" placeholder="字典名称">
+            <input type="text" id="dict_desc" placeholder="描述（可选）">
+            <input type="text" id="dict_items" placeholder='选项，逗号分隔 或 JSON 如 ["a","b"]'>
+            <button type="button" class="btn" id="dict_add">添加</button>
+            <button type="button" class="btn" id="dict_cancel_edit" style="display: none;">取消编辑</button>
+        </div>
+        <table id="dict_table">
+            <thead><tr><th>名称</th><th>描述</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+        </table>
+
+        <h2>Jenkins 参数配置</h2>
+        <p style="font-size: 13px; color: #666; margin-bottom: 8px;">可视化添加参数：参数名（Jenkins 真实参数名）、显示名、类型、数据来源（分支从 GitLab 拉取、下拉可来自配置字典或内联选项）。</p>
+        <div class="jpc-form">
+            <input type="hidden" id="jpc_edit_id" value="">
+            <div class="jpc-form-row">
+                <label>配置名称</label>
+                <input type="text" id="jpc_name" placeholder="如：GitLab 默认">
+                <label>关联 GitLab</label>
+                <select id="jpc_gitlab"><option value="">不关联</option></select>
+            </div>
+            <div class="jpc-params">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>参数名</th>
+                            <th>显示名</th>
+                            <th>类型</th>
+                            <th>数据来源</th>
+                            <th>字典/选项</th>
+                            <th>允许空</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="jpc_params_tbody"></tbody>
+                </table>
+                <button type="button" class="btn btn-small" id="jpc_add_param">+ 添加参数</button>
+            </div>
+            <div style="margin-top: 12px;">
+                <button type="button" class="btn" id="jpc_add">保存配置</button>
+                <button type="button" class="btn btn-small" id="jpc_cancel_edit" style="display: none;">取消编辑</button>
+            </div>
+        </div>
+        <table id="jpc_table">
+            <thead><tr><th>名称</th><th>GitLab</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <script>
+        function showMsg(text, type) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = 'message ' + (type || 'success');
+            el.style.display = 'block';
+            setTimeout(function() { el.style.display = 'none'; }, 4000);
+        }
+        async function api(method, url, body) {
+            const opt = { method, headers: {} };
+            if (body) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+            const r = await fetch(url, opt);
+            const data = await r.json().catch(function() { return {}; });
+            if (!r.ok) throw new Error(data.error || r.statusText);
+            return data;
+        }
+        async function loadGitlab() {
+            const data = await api('GET', '/api/gitlab/configs');
+            const tbody = document.querySelector('#gitlab_table tbody');
+            tbody.innerHTML = (data.data || []).map(function(r) {
+                return '<tr><td>' + (r.name || '') + '</td><td>' + (r.base_url || '') + '</td><td><button type="button" class="btn btn-small gl-edit" data-id="' + r.id + '">编辑</button> <button type="button" class="btn btn-small btn-danger gl-del" data-id="' + r.id + '">删除</button></td></tr>';
+            }).join('');
+            tbody.querySelectorAll('.gl-edit').forEach(function(btn) {
+                btn.onclick = async function() {
+                    const id = btn.dataset.id;
+                    try {
+                        const one = await api('GET', '/api/gitlab/configs/' + id);
+                        const d = one.data || {};
+                        document.getElementById('gl_edit_id').value = id;
+                        document.getElementById('gl_name').value = d.name || '';
+                        document.getElementById('gl_base_url').value = d.base_url || '';
+                        document.getElementById('gl_token').value = '';
+                        document.getElementById('gl_token_current').value = d.token || '';
+                        document.getElementById('gl_ssl_verify').checked = d.ssl_verify !== false;
+                        document.getElementById('gl_add').textContent = '保存修改';
+                        document.getElementById('gl_cancel_edit').style.display = 'inline-block';
+                    } catch (e) { showMsg(e.message, 'error'); }
+                };
+            });
+            tbody.querySelectorAll('.gl-del').forEach(function(btn) {
+                btn.onclick = async function() {
+                    if (!confirm('确定删除？')) return;
+                    try {
+                        await api('DELETE', '/api/gitlab/configs/' + btn.dataset.id);
+                        showMsg('已删除');
+                        loadGitlab();
+                        loadJpcOptions();
+                    } catch (e) { showMsg(e.message, 'error'); }
+                };
+            });
+            const sel = document.getElementById('jpc_gitlab');
+            const first = sel.options[0];
+            sel.innerHTML = '';
+            sel.appendChild(first);
+            (data.data || []).forEach(function(r) { sel.appendChild(new Option(r.name, r.id)); });
+        }
+        document.getElementById('gl_cancel_edit').onclick = function() {
+            document.getElementById('gl_edit_id').value = '';
+            document.getElementById('gl_token_current').value = '';
+            document.getElementById('gl_name').value = '';
+            document.getElementById('gl_base_url').value = '';
+            document.getElementById('gl_token').value = '';
+            document.getElementById('gl_ssl_verify').checked = true;
+            document.getElementById('gl_add').textContent = '添加';
+            this.style.display = 'none';
+        };
+        async function loadDictionaries() {
+            const data = await api('GET', '/api/dictionaries');
+            dictionariesList = data.data || [];
+            const tbody = document.querySelector('#dict_table tbody');
+            tbody.innerHTML = dictionariesList.map(function(r) {
+                return '<tr><td>' + (r.name || '') + '</td><td>' + (r.description || '') + '</td><td><button type="button" class="btn btn-small dict-edit" data-id="' + r.id + '">编辑</button> <button type="button" class="btn btn-small btn-danger dict-del" data-id="' + r.id + '">删除</button></td></tr>';
+            }).join('');
+            tbody.querySelectorAll('.dict-edit').forEach(function(btn) {
+                btn.onclick = async function() {
+                    const id = btn.dataset.id;
+                    try {
+                        const one = await api('GET', '/api/dictionaries/' + id);
+                        const d = one.data || {};
+                        var itemsStr = '';
+                        if (d.items != null) {
+                            var arr = typeof d.items === 'string' ? (function() { try { return JSON.parse(d.items); } catch (e) { return []; } })() : d.items;
+                            if (Array.isArray(arr)) itemsStr = arr.map(function(x) { return (typeof x === 'object' && x && (x.value != null || x.label != null)) ? (x.value != null ? x.value : x.label) : x; }).join(', ');
+                            else itemsStr = String(d.items);
+                        }
+                        document.getElementById('dict_edit_id').value = id;
+                        document.getElementById('dict_name').value = d.name || '';
+                        document.getElementById('dict_desc').value = d.description || '';
+                        document.getElementById('dict_items').value = itemsStr;
+                        document.getElementById('dict_add').textContent = '保存修改';
+                        document.getElementById('dict_cancel_edit').style.display = 'inline-block';
+                    } catch (e) { showMsg(e.message, 'error'); }
+                };
+            });
+            tbody.querySelectorAll('.dict-del').forEach(function(btn) {
+                btn.onclick = async function() {
+                    if (!confirm('确定删除？')) return;
+                    try {
+                        await api('DELETE', '/api/dictionaries/' + btn.dataset.id);
+                        showMsg('已删除');
+                        loadDictionaries();
+                    } catch (e) { showMsg(e.message, 'error'); }
+                };
+            });
+        }
+        document.getElementById('dict_cancel_edit').onclick = function() {
+            document.getElementById('dict_edit_id').value = '';
+            document.getElementById('dict_name').value = '';
+            document.getElementById('dict_desc').value = '';
+            document.getElementById('dict_items').value = '';
+            document.getElementById('dict_add').textContent = '添加';
+            this.style.display = 'none';
+        };
+        var dictionariesList = [];
+        function loadJpcOptions() {
+            fetch('/api/gitlab/configs').then(function(r) { return r.json(); }).then(function(data) {
+                const sel = document.getElementById('jpc_gitlab');
+                const first = sel.querySelector('option[value=""]') || (function() { var o = document.createElement('option'); o.value = ''; o.textContent = '不关联 GitLab'; return o; })();
+                sel.innerHTML = '';
+                sel.appendChild(first);
+                (data.data || []).forEach(function(r) { sel.appendChild(new Option(r.name, r.id)); });
+            });
+        }
+        function updateSourceExtraCell(cell, paramType, source, dictId, optionsStr) {
+            cell.innerHTML = '';
+            if (paramType !== 'dropdown') return;
+            if (source === 'dictionary') {
+                const sel = document.createElement('select');
+                sel.className = 'jpc-param-dictionary';
+                sel.innerHTML = '<option value="">选择字典</option>';
+                dictionariesList.forEach(function(d) { sel.appendChild(new Option(d.name, d.id)); });
+                if (dictId) sel.value = dictId;
+                cell.appendChild(sel);
+            } else if (source === 'options' || source === '') {
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = '选项逗号分隔';
+                inp.className = 'jpc-param-options';
+                if (optionsStr) inp.value = optionsStr;
+                cell.appendChild(inp);
+            }
+        }
+        function escapeAttr(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function addParamRow(initial) {
+            initial = initial || {};
+            const tbody = document.getElementById('jpc_params_tbody');
+            const tr = document.createElement('tr');
+            tr.className = 'jpc-param-row';
+            const paramType = initial.param_type || 'dropdown';
+            const source = initial.source || '';
+            const dictId = initial.dictionary_id != null ? initial.dictionary_id : '';
+            const optionsStr = Array.isArray(initial.options) ? initial.options.join(', ') : (initial.optionsStr || '');
+            tr.innerHTML =
+                '<td><input type="text" class="jpc-param-name" placeholder="如 BRANCH_TAG" value="' + escapeAttr(initial.param_name) + '"></td>' +
+                '<td><input type="text" class="jpc-param-label" placeholder="显示名" value="' + escapeAttr(initial.label) + '"></td>' +
+                '<td><select class="jpc-param-type"><option value="dropdown"' + (paramType === 'dropdown' ? ' selected' : '') + '>下拉</option><option value="number"' + (paramType === 'number' ? ' selected' : '') + '>数字</option><option value="text"' + (paramType === 'text' ? ' selected' : '') + '>文本</option></select></td>' +
+                '<td><select class="jpc-param-source"><option value="">无</option><option value="gitlab_branches"' + (source === 'gitlab_branches' ? ' selected' : '') + '>GitLab 分支</option><option value="dictionary"' + (source === 'dictionary' ? ' selected' : '') + '>配置字典</option><option value="options"' + (source === 'options' ? ' selected' : '') + '>内联选项</option></select></td>' +
+                '<td class="source-extra"></td>' +
+                '<td><input type="checkbox" class="jpc-param-allow-empty"' + (initial.allow_empty !== false ? ' checked' : '') + '></td>' +
+                '<td><button type="button" class="btn btn-small btn-danger jpc-param-remove">删除</button></td>';
+            const extraCell = tr.querySelector('.source-extra');
+            updateSourceExtraCell(extraCell, paramType, source, dictId, optionsStr);
+            tr.querySelector('.jpc-param-type').onchange = function() {
+                const src = tr.querySelector('.jpc-param-source');
+                if (this.value !== 'dropdown') { src.value = ''; }
+                updateSourceExtraCell(extraCell, this.value, src.value, '', '');
+            };
+            tr.querySelector('.jpc-param-source').onchange = function() {
+                updateSourceExtraCell(extraCell, tr.querySelector('.jpc-param-type').value, this.value, '', '');
+            };
+            tr.querySelector('.jpc-param-remove').onclick = function() { tr.remove(); };
+            tbody.appendChild(tr);
+        }
+        function collectParamDefinitions() {
+            const rows = document.querySelectorAll('#jpc_params_tbody .jpc-param-row');
+            const defs = [];
+            rows.forEach(function(tr) {
+                const paramName = (tr.querySelector('.jpc-param-name') || {}).value || '';
+                if (!paramName.trim()) return;
+                const label = (tr.querySelector('.jpc-param-label') || {}).value || '';
+                const paramType = (tr.querySelector('.jpc-param-type') || {}).value || 'text';
+                const source = (tr.querySelector('.jpc-param-source') || {}).value || '';
+                const allowEmpty = (tr.querySelector('.jpc-param-allow-empty') || {}).checked !== false;
+                const obj = { param_name: paramName.trim(), param_type: paramType, allow_empty: allowEmpty };
+                if (label) obj.label = label.trim();
+                if (paramType === 'dropdown') {
+                    if (source === 'gitlab_branches') obj.source = 'gitlab_branches';
+                    else if (source === 'dictionary') {
+                        obj.source = 'dictionary';
+                        const sel = tr.querySelector('.jpc-param-dictionary');
+                        if (sel && sel.value) obj.dictionary_id = parseInt(sel.value, 10);
+                    } else {
+                        const inp = tr.querySelector('.jpc-param-options');
+                        if (inp && inp.value) obj.options = inp.value.split(/[,，]/).map(function(s) { return s.trim(); }).filter(Boolean);
+                    }
+                }
+                defs.push(obj);
+            });
+            return defs;
+        }
+        async function loadJenkinsParamConfigs() {
+            const data = await api('GET', '/api/jenkins-param-configs');
+            const glData = await fetch('/api/gitlab/configs').then(function(r) { return r.json(); });
+            const glMap = {};
+            (glData.data || []).forEach(function(r) { glMap[r.id] = r.name; });
+            const tbody = document.querySelector('#jpc_table tbody');
+            tbody.innerHTML = (data.data || []).map(function(r) {
+                var gname = (r.gitlab_config_id != null && glMap[r.gitlab_config_id]) ? glMap[r.gitlab_config_id] : '-';
+                return '<tr><td>' + (r.name || '') + '</td><td>' + gname + '</td><td><button type="button" class="btn btn-small jpc-edit" data-id="' + r.id + '">编辑</button> <button type="button" class="btn btn-small btn-danger jpc-del" data-id="' + r.id + '">删除</button></td></tr>';
+            }).join('');
+            tbody.querySelectorAll('.jpc-edit').forEach(function(btn) {
+                btn.onclick = async function() {
+                    var id = btn.dataset.id;
+                    try {
+                        var one = await api('GET', '/api/jenkins-param-configs/' + id);
+                        var d = one.data || {};
+                        document.getElementById('jpc_edit_id').value = id;
+                        document.getElementById('jpc_name').value = d.name || '';
+                        document.getElementById('jpc_gitlab').value = (d.gitlab_config_id != null && d.gitlab_config_id !== '') ? String(d.gitlab_config_id) : '';
+                        document.getElementById('jpc_params_tbody').innerHTML = '';
+                        var defs = d.param_definitions || [];
+                        defs.forEach(function(def) { addParamRow(def); });
+                        document.getElementById('jpc_add').textContent = '保存修改';
+                        document.getElementById('jpc_cancel_edit').style.display = 'inline-block';
+                    } catch (e) { showMsg(e.message || '加载失败', 'error'); }
+                };
+            });
+            tbody.querySelectorAll('.jpc-del').forEach(function(btn) {
+                btn.onclick = async function() {
+                    if (!confirm('确定删除？')) return;
+                    try {
+                        await api('DELETE', '/api/jenkins-param-configs/' + btn.dataset.id);
+                        showMsg('已删除');
+                        loadJenkinsParamConfigs();
+                    } catch (e) { showMsg(e.message, 'error'); }
+                };
+            });
+        }
+        document.getElementById('jpc_cancel_edit').onclick = function() {
+            document.getElementById('jpc_edit_id').value = '';
+            document.getElementById('jpc_name').value = '';
+            document.getElementById('jpc_gitlab').value = '';
+            document.getElementById('jpc_params_tbody').innerHTML = '';
+            document.getElementById('jpc_add').textContent = '保存配置';
+            this.style.display = 'none';
+        };
+        document.getElementById('gl_add').onclick = async function() {
+            var editId = document.getElementById('gl_edit_id').value.trim();
+            var name = document.getElementById('gl_name').value.trim();
+            var base_url = document.getElementById('gl_base_url').value.trim();
+            var token = document.getElementById('gl_token').value;
+            var tokenCurrent = document.getElementById('gl_token_current').value;
+            if (!name || !base_url) { showMsg('请填写名称、Base URL', 'error'); return; }
+            if (!editId && !token) { showMsg('请填写 Private Token', 'error'); return; }
+            var tokenToSend = token.trim() || tokenCurrent;
+            if (!tokenToSend) { showMsg('请填写 Private Token', 'error'); return; }
+            try {
+                if (editId) {
+                    await api('PUT', '/api/gitlab/configs/' + editId, { name: name, base_url: base_url, token: tokenToSend, ssl_verify: document.getElementById('gl_ssl_verify').checked });
+                    showMsg('已保存');
+                    document.getElementById('gl_cancel_edit').click();
+                } else {
+                    await api('POST', '/api/gitlab/configs', { name: name, base_url: base_url, token: tokenToSend, ssl_verify: document.getElementById('gl_ssl_verify').checked });
+                    showMsg('已添加');
+                    document.getElementById('gl_name').value = document.getElementById('gl_base_url').value = document.getElementById('gl_token').value = '';
+                }
+                loadGitlab();
+            } catch (e) { showMsg(e.message, 'error'); }
+        };
+        document.getElementById('dict_add').onclick = async function() {
+            var editId = document.getElementById('dict_edit_id').value.trim();
+            var name = document.getElementById('dict_name').value.trim();
+            var desc = document.getElementById('dict_desc').value.trim();
+            var raw = document.getElementById('dict_items').value.trim();
+            if (!name) { showMsg('请填写字典名称', 'error'); return; }
+            var items = [];
+            if (raw.startsWith('[')) { try { items = JSON.parse(raw); } catch (e) { showMsg('JSON 格式错误', 'error'); return; } }
+            else if (raw) { items = raw.split(/[,，]/).map(function(s) { return s.trim(); }).filter(Boolean); }
+            try {
+                if (editId) {
+                    await api('PUT', '/api/dictionaries/' + editId, { name: name, description: desc, items: items });
+                    showMsg('已保存');
+                    document.getElementById('dict_cancel_edit').click();
+                } else {
+                    await api('POST', '/api/dictionaries', { name: name, description: desc, items: items });
+                    showMsg('已添加');
+                    document.getElementById('dict_name').value = document.getElementById('dict_desc').value = document.getElementById('dict_items').value = '';
+                }
+                loadDictionaries();
+            } catch (e) { showMsg(e.message, 'error'); }
+        };
+        document.getElementById('jpc_add_param').onclick = function() { addParamRow({}); };
+        document.getElementById('jpc_add').onclick = async function() {
+            var editId = document.getElementById('jpc_edit_id').value.trim();
+            var name = document.getElementById('jpc_name').value.trim();
+            var gitlab_id = document.getElementById('jpc_gitlab').value;
+            if (!name) { showMsg('请填写配置名称', 'error'); return; }
+            var defs = collectParamDefinitions();
+            try {
+                if (editId) {
+                    await api('PUT', '/api/jenkins-param-configs/' + editId, { name: name, gitlab_config_id: gitlab_id ? parseInt(gitlab_id, 10) : null, param_definitions: defs });
+                    showMsg('已更新');
+                    document.getElementById('jpc_cancel_edit').click();
+                } else {
+                    await api('POST', '/api/jenkins-param-configs', { name: name, gitlab_config_id: gitlab_id ? parseInt(gitlab_id, 10) : null, param_definitions: defs });
+                    showMsg('已保存');
+                    document.getElementById('jpc_name').value = '';
+                    document.getElementById('jpc_params_tbody').innerHTML = '';
+                }
+                loadJenkinsParamConfigs();
+            } catch (e) { showMsg(e.message, 'error'); }
+        };
+        loadGitlab();
+        loadDictionaries();
+        loadJenkinsParamConfigs();
+    </script>
+</body>
+</html>

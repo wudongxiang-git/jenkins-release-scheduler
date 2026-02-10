@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发版计划列表</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-bottom: 30px;
+            color: #333;
+        }
+        .nav {
+            margin-bottom: 20px;
+        }
+        .nav a {
+            color: #1890ff;
+            text-decoration: none;
+            margin-right: 20px;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        th {
+            background: #fafafa;
+            font-weight: 500;
+            color: #333;
+        }
+        tr:hover {
+            background: #fafafa;
+        }
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: inline-block;
+        }
+        .status.pending {
+            background: #fff7e6;
+            color: #d46b08;
+        }
+        .status.running {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+        .status.completed {
+            background: #f6ffed;
+            color: #52c41a;
+        }
+        .status.failed {
+            background: #fff2f0;
+            color: #ff4d4f;
+        }
+        .status.cancelled {
+            background: #f5f5f5;
+            color: #8c8c8c;
+        }
+        .detail-link {
+            color: #1890ff;
+            text-decoration: none;
+        }
+        .detail-link:hover {
+            text-decoration: underline;
+        }
+        .detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        .detail-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .detail-content h2 {
+            margin-bottom: 20px;
+        }
+        .detail-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #fafafa;
+            border-radius: 4px;
+        }
+        .detail-item strong {
+            display: inline-block;
+            width: 120px;
+        }
+        .close-btn {
+            float: right;
+            background: #f0f0f0;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .close-btn:hover {
+            background: #d9d9d9;
+        }
+        .btn-link {
+            color: #1890ff;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0 8px;
+            font-size: 14px;
+        }
+        .btn-link:hover { text-decoration: underline; }
+        .btn-link.danger { color: #ff4d4f; }
+        .btn-link + .btn-link { margin-left: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>发版计划列表</h1>
+        <div class="nav">
+            <a href="/">创建发版计划</a>
+            <a href="/plans">发版计划列表</a>
+            <a href="/config">配置</a>
+        </div>
+
+        <table id="plansTable">
+            <thead>
+                <tr>
+                    <th>计划 ID</th>
+                    <th>计划时间</th>
+                    <th>状态</th>
+                    <th>任务数</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 20px;">加载中...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 详情模态框 -->
+    <div id="detailModal" class="detail-modal">
+        <div class="detail-content">
+            <button class="close-btn" onclick="closeDetail()">关闭</button>
+            <h2>计划详情</h2>
+            <div id="detailContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // 加载计划列表
+        async function loadPlans() {
+            try {
+                const response = await fetch('/api/plans');
+                const result = await response.json();
+                
+                if (result.success) {
+                    renderPlans(result.data);
+                } else {
+                    document.querySelector('#plansTable tbody').innerHTML = 
+                        '<tr><td colspan="6" style="text-align: center; padding: 20px;">加载失败: ' + result.error + '</td></tr>';
+                }
+            } catch (error) {
+                document.querySelector('#plansTable tbody').innerHTML = 
+                    '<tr><td colspan="6" style="text-align: center; padding: 20px;">加载失败: ' + error.message + '</td></tr>';
+            }
+        }
+
+        // 渲染计划列表
+        function renderPlans(plans) {
+            const tbody = document.querySelector('#plansTable tbody');
+            
+            if (plans.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">暂无计划</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = plans.map(plan => {
+                const scheduledAt = new Date(plan.scheduled_at);
+                const createdAt = new Date(plan.created_at);
+                const actions = [
+                    '<a href="#" class="detail-link" onclick="showDetail(' + plan.id + '); return false;">查看详情</a>'
+                ];
+                if (plan.status === 'pending') {
+                    actions.push('<button type="button" class="btn-link danger" onclick="cancelPlan(' + plan.id + ')">取消</button>');
+                } else if (plan.status === 'running') {
+                    actions.push('<button type="button" class="btn-link danger" onclick="terminatePlan(' + plan.id + ')">终止</button>');
+                }
+                return `
+                    <tr data-plan-id="${plan.id}">
+                        <td>#${plan.id}</td>
+                        <td>${scheduledAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</td>
+                        <td><span class="status ${plan.status}">${getStatusText(plan.status)}</span></td>
+                        <td>${plan.item_count}</td>
+                        <td>${createdAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</td>
+                        <td>${actions.join('')}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const map = {
+                'pending': '待执行',
+                'running': '执行中',
+                'completed': '已完成',
+                'failed': '失败',
+                'cancelled': '已取消'
+            };
+            return map[status] || status;
+        }
+
+        // 显示详情
+        async function showDetail(planId) {
+            try {
+                const response = await fetch(`/api/plans/${planId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    const plan = result.data;
+                    const scheduledAt = new Date(plan.scheduled_at);
+                    
+                    let itemsHtml = plan.items.map(item => {
+                        let statusText = '未触发';
+                        if (item.triggered) {
+                            if (item.success === true) {
+                                statusText = '成功';
+                            } else if (item.success === false) {
+                                statusText = '失败';
+                            } else {
+                                statusText = '执行中';
+                            }
+                        }
+                        
+                        return `
+                            <div class="detail-item">
+                                <strong>任务名:</strong> ${item.jenkins_job_name}<br>
+                                <strong>分支:</strong> ${item.branch || '(使用默认)'}<br>
+                                <strong>操作:</strong> ${item.operation || '(使用默认)'}<br>
+                                <strong>Pod数:</strong> ${item.pod_num || '(使用默认)'}<br>
+                                <strong>构建号:</strong> ${item.build_number ? '#' + item.build_number : 'N/A'}<br>
+                                <strong>状态:</strong> ${statusText}<br>
+                                ${item.failure_reason ? `<strong>失败原因:</strong> ${item.failure_reason}<br>` : ''}
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    document.getElementById('detailContent').innerHTML = `
+                        <div class="detail-item">
+                            <strong>计划 ID:</strong> #${plan.id}<br>
+                            <strong>计划时间:</strong> ${scheduledAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}<br>
+                            <strong>状态:</strong> ${getStatusText(plan.status)}<br>
+                            <strong>默认分支:</strong> ${plan.default_branch || '(无)'}<br>
+                            <strong>创建时间:</strong> ${new Date(plan.created_at).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}
+                        </div>
+                        <h3 style="margin-top: 20px;">任务列表</h3>
+                        ${itemsHtml}
+                    `;
+                    
+                    document.getElementById('detailModal').style.display = 'block';
+                } else {
+                    alert('加载详情失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('加载详情失败: ' + error.message);
+            }
+        }
+
+        // 关闭详情
+        function closeDetail() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+
+        async function cancelPlan(planId) {
+            if (!confirm('确定要取消该发版计划吗？')) return;
+            try {
+                const r = await fetch('/api/plans/' + planId + '/cancel', { method: 'POST' });
+                const res = await r.json();
+                if (res.success) {
+                    loadPlans();
+                    closeDetail();
+                } else {
+                    alert('取消失败: ' + (res.error || ''));
+                }
+            } catch (e) {
+                alert('取消失败: ' + e.message);
+            }
+        }
+
+        async function terminatePlan(planId) {
+            if (!confirm('确定要终止该执行中的计划吗？')) return;
+            try {
+                const r = await fetch('/api/plans/' + planId + '/terminate', { method: 'POST' });
+                const res = await r.json();
+                if (res.success) {
+                    loadPlans();
+                    closeDetail();
+                } else {
+                    alert('终止失败: ' + (res.error || ''));
+                }
+            } catch (e) {
+                alert('终止失败: ' + e.message);
+            }
+        }
+
+        // 点击模态框外部关闭
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeDetail();
+            }
+        });
+
+        // 页面加载时加载列表
+        loadPlans();
+
+        // 支持从飞书卡片点击链接打开对应计划详情（#plan-123）
+        function openDetailFromHash() {
+            const m = (location.hash || '').match(/^#plan-(\d+)$/);
+            if (m) {
+                const planId = parseInt(m[1], 10);
+                showDetail(planId);
+                history.replaceState(null, '', location.pathname);
+            }
+        }
+        window.addEventListener('hashchange', openDetailFromHash);
+        if (location.hash) setTimeout(openDetailFromHash, 500);
+        
+        // 每30秒刷新一次
+        setInterval(loadPlans, 30000);
+    </script>
+</body>
+</html>
