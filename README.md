@@ -130,6 +130,24 @@ gunicorn -w 1 -b 0.0.0.0:5000 app:app
 
 ---
 
+## GitHub Actions 打包
+
+项目包含 `.github/workflows/build.yml`，在推送到 `main`/`master` 或打 tag（如 `v1.0.0`）时自动构建 Docker 镜像并推送到 **GitHub Container Registry (ghcr.io)**。
+
+- **push 到 main/master**：构建并推送，镜像 tag 为分支名（如 `main`）、以及 commit SHA。
+- **push tag `v*`**：构建并推送，镜像 tag 为版本号（如 `v1.0.0`、`1.0`）。
+- **Pull Request**：仅构建不推送。
+
+拉取镜像示例：
+
+```bash
+docker pull ghcr.io/<你的用户名>/jenkins-release-scheduler:main
+# 或
+docker pull ghcr.io/<你的用户名>/jenkins-release-scheduler:v1.0.0
+```
+
+若需推送到自有仓库（如 `registry.iotcloud.local`），可在仓库 Settings → Secrets 中配置 `REGISTRY`、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`，并在 workflow 中增加对应 login 与 push 步骤（可参考 [deploy/README-nerdctl.md](deploy/README-nerdctl.md) 中的仓库地址）。
+
 ## Docker 部署
 
 ### 构建镜像
