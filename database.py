@@ -72,6 +72,10 @@ def init_db():
             cursor.execute('ALTER TABLE release_plans ADD COLUMN stuck_reminder_sent INTEGER DEFAULT 0')
         except sqlite3.OperationalError:
             pass
+        try:
+            cursor.execute("ALTER TABLE release_plans ADD COLUMN execution_mode TEXT DEFAULT 'serial'")
+        except sqlite3.OperationalError:
+            pass
         # 创建索引
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_plan_status ON release_plans(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_plan_scheduled ON release_plans(scheduled_at)')

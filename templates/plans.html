@@ -162,6 +162,7 @@
                     <th>计划 ID</th>
                     <th>计划时间</th>
                     <th>状态</th>
+                    <th>发版方式</th>
                     <th>任务数</th>
                     <th>创建时间</th>
                     <th>操作</th>
@@ -169,7 +170,7 @@
             </thead>
             <tbody>
                 <tr>
-                    <td colspan="6" style="text-align: center; padding: 20px;">加载中...</td>
+                    <td colspan="7" style="text-align: center; padding: 20px;">加载中...</td>
                 </tr>
             </tbody>
         </table>
@@ -195,11 +196,11 @@
                     renderPlans(result.data);
                 } else {
                     document.querySelector('#plansTable tbody').innerHTML = 
-                        '<tr><td colspan="6" style="text-align: center; padding: 20px;">加载失败: ' + result.error + '</td></tr>';
+                        '<tr><td colspan="7" style="text-align: center; padding: 20px;">加载失败: ' + result.error + '</td></tr>';
                 }
             } catch (error) {
                 document.querySelector('#plansTable tbody').innerHTML = 
-                    '<tr><td colspan="6" style="text-align: center; padding: 20px;">加载失败: ' + error.message + '</td></tr>';
+                    '<tr><td colspan="7" style="text-align: center; padding: 20px;">加载失败: ' + error.message + '</td></tr>';
             }
         }
 
@@ -208,7 +209,7 @@
             const tbody = document.querySelector('#plansTable tbody');
             
             if (plans.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">暂无计划</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">暂无计划</td></tr>';
                 return;
             }
 
@@ -223,11 +224,13 @@
                 } else if (plan.status === 'running') {
                     actions.push('<button type="button" class="btn-link danger" onclick="terminatePlan(' + plan.id + ')">终止</button>');
                 }
+                const modeText = (plan.execution_mode === 'parallel') ? '并行' : '串行';
                 return `
                     <tr data-plan-id="${plan.id}">
                         <td>#${plan.id}</td>
                         <td>${scheduledAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</td>
                         <td><span class="status ${plan.status}">${getStatusText(plan.status)}</span></td>
+                        <td>${modeText}</td>
                         <td>${plan.item_count}</td>
                         <td>${createdAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</td>
                         <td>${actions.join('')}</td>
@@ -283,11 +286,13 @@
                         `;
                     }).join('');
                     
+                    const executionModeText = plan.execution_mode === 'parallel' ? '并行' : '串行';
                     document.getElementById('detailContent').innerHTML = `
                         <div class="detail-item">
                             <strong>计划 ID:</strong> #${plan.id}<br>
                             <strong>计划时间:</strong> ${scheduledAt.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}<br>
                             <strong>状态:</strong> ${getStatusText(plan.status)}<br>
+                            <strong>发版方式:</strong> ${executionModeText}<br>
                             <strong>默认分支:</strong> ${plan.default_branch || '(无)'}<br>
                             <strong>创建时间:</strong> ${new Date(plan.created_at).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}
                         </div>

@@ -176,7 +176,11 @@ class Scheduler:
         except Exception as e:
             logger.warning(f"发版开始通知发送失败: {e}")
         
-        # 触发所有任务（优先使用 build_params 以支持 GitLab/云效等不同参数名）
+        execution_mode = (plan_row.get('execution_mode') or 'serial').strip().lower()
+        if execution_mode != 'parallel':
+            execution_mode = 'serial'
+        logger.info(f"计划 #{plan_id} 发版方式: {execution_mode}")
+        
         items = []
         for row in item_rows:
             item_row = dict(row)
@@ -207,23 +211,17 @@ class Scheduler:
             failure_reason = None
             
             try:
-                # 触发构建
                 build_number = self.jenkins_client.trigger_build(jenkins_job_name, params)
-                
                 if build_number:
                     triggered = True
                     logger.info(f"计划 #{plan_id} - 任务 {jenkins_job_name} 触发成功，构建号: #{build_number}")
                 else:
-                    triggered = False
                     failure_reason = "触发构建失败：无法获取构建号"
                     logger.error(f"计划 #{plan_id} - 任务 {jenkins_job_name} 触发失败")
-            
             except Exception as e:
-                triggered = False
                 failure_reason = f"触发构建失败：{str(e)}"
                 logger.error(f"计划 #{plan_id} - 任务 {jenkins_job_name} 触发异常: {e}", exc_info=True)
             
-            # 立即保存触发状态
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -238,116 +236,132 @@ class Scheduler:
                 ))
                 conn.commit()
             
-            items.append({
+            item = {
                 'id': item_id,
                 'jenkins_job_name': jenkins_job_name,
                 'triggered': triggered,
                 'build_number': build_number,
                 'success': None,
                 'failure_reason': failure_reason
-            })
+            }
+            items.append(item)
+            
+            if execution_mode == 'serial':
+                # 串行：当前任务触发成功后，轮询直到该任务构建结束再处理下一个
+                if triggered and build_number:
+                    self._poll_single_build(plan_id, item)
+                else:
+                    item['success'] = False
+                    with get_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('UPDATE release_plan_items SET success=0 WHERE id=?', (item_id,))
+                        conn.commit()
+            # 并行：仅触发，不在此处轮询，后面统一 _poll_build_results
         
-        # 轮询所有任务的构建结果
-        self._poll_build_results(plan_id, items)
+        if execution_mode == 'parallel':
+            self._poll_build_results(plan_id, items)
         
-        # 所有任务完成后，发送飞书通知
+        # 更新计划状态并发送飞书通知
+        self._update_plan_status(plan_id, items)
         self._send_notification(plan_id)
     
+    def _poll_single_build(self, plan_id, item):
+        """轮询单个任务的构建结果，直到完成或超时（串行发版时使用）"""
+        item_id = item['id']
+        start_time = time.time()
+        while time.time() - start_time < self.poll_timeout:
+            try:
+                status = self.jenkins_client.get_build_status(
+                    item['jenkins_job_name'],
+                    item['build_number']
+                )
+                if not status['building']:
+                    item['success'] = (status['result'] == 'SUCCESS')
+                    if not item['success']:
+                        item['failure_reason'] = f"构建失败：{status['result']}"
+                    logger.info(
+                        f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} #{item['build_number']} "
+                        f"构建完成，结果: {'成功' if item['success'] else '失败'}"
+                    )
+                    with get_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            UPDATE release_plan_items SET success=?, failure_reason=? WHERE id=?
+                        ''', (1 if item['success'] else 0, item.get('failure_reason', '') or '', item_id))
+                        conn.commit()
+                    return
+            except Exception as e:
+                logger.warning(f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} 轮询状态失败: {e}")
+            time.sleep(self.poll_interval)
+        item['success'] = False
+        item['failure_reason'] = (item.get('failure_reason') or '') + '；轮询超时'
+        logger.warning(f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} #{item['build_number']} 轮询超时")
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE release_plan_items SET success=0, failure_reason=? WHERE id=?',
+                           (item['failure_reason'], item_id))
+            conn.commit()
+
     def _poll_build_results(self, plan_id, items):
-        """轮询所有任务的构建结果"""
-        logger.info(f"开始轮询计划 #{plan_id} 的构建结果")
-        
+        """轮询所有任务的构建结果（并行发版时使用）"""
+        logger.info(f"开始轮询计划 #{plan_id} 的构建结果（并行）")
         start_time = time.time()
         completed_item_ids = set()
-        
         while len(completed_item_ids) < len(items):
-            # 检查超时
             if time.time() - start_time > self.poll_timeout:
                 logger.warning(f"计划 #{plan_id} 轮询超时")
                 break
-            
             for item in items:
                 item_id = item['id']
                 if item_id in completed_item_ids:
                     continue
-                
                 if not item['triggered'] or not item['build_number']:
-                    # 未触发或没有构建号，标记为完成（失败）
                     item['success'] = False
                     completed_item_ids.add(item_id)
-                    
-                    # 更新数据库
                     with get_db() as conn:
                         cursor = conn.cursor()
-                        cursor.execute('''
-                            UPDATE release_plan_items
-                            SET success=0
-                            WHERE id=?
-                        ''', (item_id,))
+                        cursor.execute('UPDATE release_plan_items SET success=0 WHERE id=?', (item_id,))
                         conn.commit()
                     continue
-                
                 try:
                     status = self.jenkins_client.get_build_status(
                         item['jenkins_job_name'],
                         item['build_number']
                     )
-                    
                     if not status['building']:
-                        # 构建完成
                         item['success'] = (status['result'] == 'SUCCESS')
                         if not item['success']:
                             item['failure_reason'] = f"构建失败：{status['result']}"
                         completed_item_ids.add(item_id)
-                        
                         logger.info(
                             f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} #{item['build_number']} "
                             f"构建完成，结果: {'成功' if item['success'] else '失败'}"
                         )
-                        
-                        # 保存结果
                         with get_db() as conn:
                             cursor = conn.cursor()
                             cursor.execute('''
-                                UPDATE release_plan_items
-                                SET success=?, failure_reason=?
-                                WHERE id=?
-                            ''', (
-                                1 if item['success'] else 0,
-                                item.get('failure_reason', '') or '',
-                                item_id
-                            ))
+                                UPDATE release_plan_items SET success=?, failure_reason=? WHERE id=?
+                            ''', (1 if item['success'] else 0, item.get('failure_reason', '') or '', item_id))
                             conn.commit()
-                
                 except Exception as e:
-                    logger.error(
-                        f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} #{item['build_number']} "
-                        f"轮询状态失败: {e}"
-                    )
-                    # 继续轮询，不标记为完成
-            
-            # 如果还有未完成的，等待后继续
+                    logger.warning(f"计划 #{plan_id} - 任务 {item['jenkins_job_name']} 轮询状态失败: {e}")
             if len(completed_item_ids) < len(items):
                 time.sleep(self.poll_interval)
-        
-        # 更新计划状态
+
+    def _update_plan_status(self, plan_id, items):
+        """根据所有任务结果更新计划状态"""
+        success_count = sum(1 for item in items if item.get('success') is True)
+        fail_count = sum(1 for item in items if item.get('success') is False)
+        if fail_count == len(items):
+            status = 'failed'
+        elif success_count == len(items):
+            status = 'completed'
+        else:
+            status = 'completed'
         with get_db() as conn:
             cursor = conn.cursor()
-            
-            # 统计成功/失败数量
-            success_count = sum(1 for item in items if item.get('success') is True)
-            fail_count = sum(1 for item in items if item.get('success') is False)
-            
-            if fail_count == len(items):
-                status = 'failed'
-            elif success_count == len(items):
-                status = 'completed'
-            else:
-                status = 'completed'  # 部分成功也算 completed
-            
             cursor.execute('UPDATE release_plans SET status=? WHERE id=?', (status, plan_id))
             conn.commit()
-        
         logger.info(f"计划 #{plan_id} 执行完成，状态: {status}")
     
     def _send_notification(self, plan_id):

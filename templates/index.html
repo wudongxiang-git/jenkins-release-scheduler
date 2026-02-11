@@ -287,6 +287,13 @@
                 </div>
             </div>
             <div class="form-group">
+                <label>发版方式</label>
+                <div class="schedule-options">
+                    <label class="schedule-option"><input type="radio" name="executionMode" value="serial" id="executionSerial" checked> 串行（逐个任务完成后执行下一个）</label>
+                    <label class="schedule-option"><input type="radio" name="executionMode" value="parallel" id="executionParallel"> 并行（同时触发，由 Jenkins 调度）</label>
+                </div>
+            </div>
+            <div class="form-group">
                 <label>确认任务参数（可微调）</label>
                 <div id="confirmTableWrap" class="confirm-table-wrap">
                     <div class="loading" id="confirmTableLoading">加载中...</div>
@@ -944,12 +951,16 @@
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
 
+            const executionMode = document.querySelector('input[name="executionMode"]:checked');
+            const mode = executionMode ? executionMode.value : 'serial';
+
             try {
                 const body = {
                     scheduled_at: isoString,
                     default_branch: '',
                     items,
-                    execute_immediately: immediate
+                    execute_immediately: immediate,
+                    execution_mode: mode
                 };
                 const response = await fetch('/api/plans', {
                     method: 'POST',

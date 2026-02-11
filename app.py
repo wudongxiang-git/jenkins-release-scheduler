@@ -673,7 +673,8 @@ def list_plans():
                 'created_at': row['created_at'],
                 'status': row['status'],
                 'default_branch': row['default_branch'],
-                'item_count': row['item_count']
+                'item_count': row['item_count'],
+                'execution_mode': row['execution_mode'] if 'execution_mode' in row.keys() and row['execution_mode'] else 'serial'
             }
             result.append(plan_dict)
         return jsonify({'success': True, 'data': result})
@@ -725,6 +726,7 @@ def get_plan(plan_id):
             'created_at': plan_row['created_at'],
             'status': plan_row['status'],
             'default_branch': plan_row['default_branch'],
+            'execution_mode': plan_row['execution_mode'] if 'execution_mode' in plan_row.keys() and plan_row['execution_mode'] else 'serial',
             'items': items
         }
         return jsonify({'success': True, 'data': plan_dict})
@@ -783,6 +785,9 @@ def create_plan():
         scheduled_at_str = data.get('scheduled_at')
         default_branch = data.get('default_branch', '')
         items_data = data.get('items', [])
+        execution_mode = (data.get('execution_mode') or 'serial').strip().lower()
+        if execution_mode not in ('serial', 'parallel'):
+            execution_mode = 'serial'
         
         if not scheduled_at_str:
             return jsonify({'success': False, 'error': '缺少 scheduled_at'}), 400
@@ -829,13 +834,14 @@ def create_plan():
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO release_plans (scheduled_at, created_at, status, default_branch)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO release_plans (scheduled_at, created_at, status, default_branch, execution_mode)
+                VALUES (?, ?, ?, ?, ?)
             ''', (
                 scheduled_at.isoformat(),
                 now_shanghai.isoformat(),
                 'pending',
-                default_branch or ''
+                default_branch or '',
+                execution_mode
             ))
             plan_id = cursor.lastrowid
             
